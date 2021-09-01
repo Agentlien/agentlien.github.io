@@ -1,0 +1,251 @@
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Fog of Random</title>
+<meta name="description" content="An inside look at the Fog of Lost in Random">
+<meta name="author" content="Agentlien">
+
+<meta property="og:title" content="The Fog of Random">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://github.io/agentlien/fog">
+<meta property="og:description" content="An inside look at the Fog of Lost in Random">
+<meta property="og:image" content="https://agentlien.github.io/fog/1_ThreetownVista0.jpg">
+
+<link rel="stylesheet" href="style.css">
+<script>function initComparisons() {
+  var x, i;
+  /* Find all elements with an "overlay" class: */
+  x = document.getElementsByClassName("img-comp-overlay");
+  for (i = 0; i < x.length; i++) {
+    /* Once for each "overlay" element:
+    pass the "overlay" element as a parameter when executing the compareImages function: */
+	var y = x[i].parentElement.getElementsByClassName("img-comp-base");
+    if(y.length > 0)
+	  compareImages(y[0], x[i]);
+  }
+  function compareImages(base, overlay) {
+    var slider, clicked = 0, w, h;
+    /* Create slider: */
+    slider = document.createElement("DIV");
+    slider.setAttribute("class", "img-comp-slider");
+    /* Insert slider */
+    base.parentElement.insertBefore(slider, base);
+	onResize();
+    /* Position the slider in the middle: */
+	window.addEventListener("resize", onResize);
+    /* Execute a function when the mouse button is pressed: */
+    slider.addEventListener("mousedown", slideReady);
+    /* And another function when the mouse button is released: */
+    window.addEventListener("mouseup", slideFinish);
+    /* Or touched (for touch screens: */
+    slider.addEventListener("touchstart", slideReady);
+     /* And released (for touch screens: */
+    window.addEventListener("touchend", slideFinish);
+
+	function onResize() {
+		w = base.offsetWidth;
+		h = base.offsetHeight;
+		overlay.style.width = (w / 2) + "px";
+		overlay.style.height = base.offsetHeight + "px";
+		slider.style.top = (h / 2) - (slider.offsetHeight / 2) + "px";
+		slider.style.left = overlay.offsetWidth - (slider.offsetWidth / 2) + "px";
+
+		var baseImage = document.getElementById(base.id + "Image");
+		var overlayImage = document.getElementById(overlay.id + "Image");
+		base.parentElement.style.height = baseImage.height;
+		overlayImage.width = baseImage.width;
+		overlayImage.height = baseImage.height;
+	}
+
+    function slideReady(e) {
+      /* Prevent any other actions that may occur when moving over the image: */
+      e.preventDefault();
+      /* The slider is now clicked and ready to move: */
+      clicked = 1;
+      /* Execute a function when the slider is moved: */
+      window.addEventListener("mousemove", slideMove);
+      window.addEventListener("touchmove", slideMove);
+    }
+
+    function slideFinish() {
+      /* The slider is no longer clicked: */
+      clicked = 0;
+    }
+    function slideMove(e) {
+      var pos;
+      /* If the slider is no longer clicked, exit this function: */
+      if (clicked == 0) return false;
+      /* Get the cursor's x position: */
+      pos = getCursorPos(e)
+      /* Prevent the slider from being positioned outside the image: */
+      if (pos < 0) pos = 0;
+      if (pos > w) pos = w;
+      /* Execute a function that will resize the overlay image according to the cursor: */
+      slide(pos);
+    }
+    function getCursorPos(e) {
+      var a, x = 0;
+      e = (e.changedTouches) ? e.changedTouches[0] : e;
+      /* Get the x positions of the image: */
+      a = base.getBoundingClientRect();
+      /* Calculate the cursor's x coordinate, relative to the image: */
+      x = e.pageX - a.left;
+      /* Consider any page scrolling: */
+      x = x - window.pageXOffset;
+      return x;
+    }
+    function slide(x) {
+      /* Resize the image: */
+      overlay.style.width = x + "px";
+      /* Position the slider: */
+      slider.style.left = overlay.offsetWidth - (slider.offsetWidth / 2) + "px";
+    }
+  }
+}
+</script>
+</head>
+<body>
+
+<h1>The Fog of Random</h1>
+
+<h2>An inside look...</h2>
+<p>
+During the development of Lost in Random our artists have often posted concept art or other behind the scenes glances. At some point someone wondered if we could do something similar from the code side. While things were a bit hectic at that point I really liked the idea, seeing as I myself love getting to peek behind the curtain of the games I enjoy playing. I wanted to reciprocate and write a slightly more technical piece about what I happened to be working on at that time. A year later the game is finished and I finally found some time to sit down and write a brief article which hopefully provides an interesting glance at what goes into a particularly interesting visual effect and how it helps shape the overall look of our game. 
+</p>
+
+<figure>
+<img class="screenshot" width=960 src="0_TwoTownEntrance.jpg" />
+<figcaption>A screenshot from Lost in Random</figcaption>
+</figure>
+
+<h2>... at the look of Random</h2>
+<p>
+Lost in Random has a very particular visual style. A lot of thought and effort has gone into shaping it. When I first joined Zoink as their graphics programmer the game's visuals and environments were already quite far along. My job was more a matter of taking what we had and help mould it into something which could actually run on our target platforms. Getting things fast enough while still looking close to what was originally envisioned has been quite a challenge.
+</p>
+
+<p>
+With this article I hope to provide some insight into one small part of what shapes this aesthetic and the work which went into it. While there are many aspects building up this unique look the one I wish to talk about here is the use of colorful fog. It may seem like a simple effect, but it has a big impact on the overall look. To see what I mean, look at these screenshots captured in-engine with and without the fog enabled.
+</p>
+
+<figure>
+<div class="img-comp-container">
+	<div class="img-comp-img img-comp-base" id="VistaBase">
+		<img src="1_ThreetownVista0.jpg" id="VistaBaseImage" width=960 height=540 />
+	</div>
+	<div class="img-comp-img img-comp-overlay" id="VistaOverlay">
+		<img src="2_ThreetownVista1.jpg" id="VistaOverlayImage" width=960 height=540 />
+	</div>
+</div>
+<figcaption>The same vista with and without fog. Use the slider to change between the two.</figcaption>
+</figure>
+
+<p>
+Initially, the project used Unity's High Definition Render Pipeline (HDRP) and its built-in Volumetric Fog. This looks absolutely stunning, but unfortunately proved too computationally taxing for several of our target platforms. The biggest problem, as expected, was Nintendo Switch. The Switch is a wonderful platform. As a gamer it is probably my favourite one. Unfortunately, it's not the most powerful machine.
+</p>
+
+<p>
+After spending a few months testing different options and exploring the intricacies of Unity's renderers, the approach we settled on included abandoning HDRP for the simpler but more performant Universal Render Pipeline (URP) across all platforms. While we worried about the less realistic lighting, project leadership actually preferred the more cartoonish look its simplified lighting led to. This of course meant we no longer had access to the HDRP fog. At first, I tried porting this fog to URP, but this proved to be more trouble than it was worth.
+</p>
+
+<p>
+In the end we used two different implementations for the fog. There is a volumetric fog used on most platforms. The other is a screen space solution developed to be fast enough for the Switch. Interestingly, we're using this screen space solution in the dream sequences across all platforms.
+</p>
+<h2>Volumetric Fog</h2>
+
+<p>
+Our volumetric fog used on higher end platforms is a modified version of Aura 2, an asset developed by Oniric Studio. This asset is very similar to the one built into HDRP from a technical standpoint, but our artists found it easier to configure just the way they wanted. Some work was required to convert it to URP and add a few features we felt were missing. 
+</p>
+
+<p>
+In order to convert Aura 2 to URP we created a new <code>ScriptableRendererFeature</code> which calls the Aura code and blits the results to the frame buffer. The <code>Camera.onPreCull</code> and <code>Camera.onPreRender</code> callbacks were simply converted to <code>RenderPipelineManager.beginCameraRendering</code> callbacks. We also had to make some modifications to our shaders to make transparent objects play nice with our fog, since they don't write to the depth buffer.
+</p>
+
+<p>
+The biggest change made to Aura 2 was adding the directional light attenuation present in the HDRP fog which dims the sunlight the lower you descend into deep fog. Here you can see the same view with and without this feature enabled.
+</p>
+
+<figure>
+<div class="img-comp-container">
+<div class="img-comp-img img-comp-base" id="dimmingBase"><img src="3_SunDimming_On.jpg" id="dimmingBaseImage" width="960" height="540"/></div>
+<div class="img-comp-img img-comp-overlay" id="dimmingOverlay"><img src="4_SunDimming_Off.jpg" id="dimmingOverlayImage" width="960" height="540"/></div>
+</div>
+<figcaption>A foggy view with and without directional light attenuation. Use the slider to change between the two.</figcaption>
+</figure>
+
+<p>
+This effect is one of many little changes we ended up making to the Lit shader. It's copied from the height attenuation in HDRP's LightEvaluation.hlsl, which I moved into URP's Lighting.hlsl. The only additional code needed is for our fog volume manager to gather and average extinction parameters from all currently active fog volumes.
+</p>
+
+<h2>Screen Space Fog</h2>
+
+<p>
+In order to retain its visual style across platforms, we needed a fog which looked as close as possible to what was envisioned while still being fast enough to use on the Switch. After evaluating a large number of existing solutions I ended up writing my own exponential height fog meant specifically for the Switch. 
+</p>
+
+<p>
+What this means is that it is a screen space solution which uses height coordinates to determine the fog color and an exponential falloff for its density. Given a fog density <code>density</code> and a view distance <code>depth</code> the fog color is multiplied by <code>1.0 - exp(-depth * density)</code> which gives us a factor which starts at 0.0 at distance 0.0 and grows towards 1.0 as the view distance goes towards infinity.
+</p>
+
+<p>
+The fog consists of three layers: the lower layer, the upper layer, and the skybox layer. Each layer has its own height, color and density. Anything which is further than a specified distance from the camera and above the skybox height will use the previously mentioned exponential function applied to the skybox layer's color. Otherwise, we calculate the part of the view depth which traverses between the lower and upper height and use it to calculate a viewed height inside the fog. We then use something akin to <code>smoothstep(LowerHeight, UpperHeight, viewHeight)</code> to do an inverse lerp between the lower and upper height and use the resulting value as a lerp parameter between the lower and upper colors. This makes our fog a gradient between these two values. 
+</p>
+
+<p>
+Well, there are actually two ways to calculate the view height. The default simply takes the height reached by following a ray of length <code>depth</code> from the camera position and through the pixel center. This means the color gradient between lower and upper height is clearly visible across the sky at most viewing angles. The other option is to calculate the average height the ray travels through. This gives a softer more washed out look. I added these two because I wasn't quite sure which option our artist had meant when describing what they wanted. The idea was to let them test both and remove the "wrong" one. After they had been thoroughly tested and compared I was informed that both were needed. In fact, some scenes even ended up with fog volumes combining both of these for a more dynamic look.
+</p>
+
+<h3>Three Modes</h3>
+<p>
+A single instance of this height based solution isn't enough to get as close to the volumetric version as we wanted. In order to achieve a better result we combine a number of these fogs in every scene. Our fog supports three different modes which determines when and where they are rendered.
+</p>
+
+<p>
+<ul>
+	<li> <code>Global</code> - Renders as long as the user isn't fully inside a volume with mode <code>RenderWhileInside</code>. This is used to configure the overall look of the scene.
+	<li> <code>RenderWhileInside</code> - Invisible from the outside and only rendered when the camera position lies within its bounds. Used to override the global look for smaller areas.
+	<li> <code>PhysicalObject</code> - Rendered as a box and primarily used to form a layer of fog running across the ground.
+</ul>
+</p>
+
+<p>
+ A typical scene uses one or two <code>Global</code> fog volumes plus about a dozen volumes using either the <code>RenderWhileInside</code> or <code>PhysicalObject</code> modes.
+</p>
+
+<p>
+Our screen space fog also supports the aforementioned light attenuation. This simply means its manager feeds the Lit shader with the same data as our modified version of Aura 2 does. It doesn't actually affect the fog shader itself. There are some more bells and whistles (such as how sunlight is blended into the fog color), but overall it's a fairly straightforward shader designed to look good enough without needing any information beyond camera transform and render depth.
+</p>
+
+
+<h3>Swirly fun</h3>
+<p>
+My favourite little fog feature was a happy surprise and is actually exclusive to the screen space version. Along the top of the fog volumes running across the ground there's an animated texture with wisps of fog floating by. When first implementing these volumes I added a simple noise to make the fog edge a bit fuzzy instead of looking like a sharp box. I also made it animated to make any patterns in the noise a bit less noticeable. Then, by request from our amazing Environment Artist Leo Brynielsson, I swapped out the noise function for a texture. I had envisioned that he simply wanted to pick his own noise function without having to ask me to make changes to the code. Instead, he used it to make this:
+</p>
+
+<figure>
+<video width="960" height="540" autoplay loop muted >
+	<source src="5_Fog_wisps.mp4" type="video/mp4" />
+</video>
+<figcaption>Wisps of fog on the Switch version of Lost in Random.</figcaption>
+</figure>
+
+<h2>Random Rules!</h2>
+
+<p>
+ This has of course only been an overview and there's more to it. Still, I hope this has been interesting and that you've come away with some appreciation for the magic which goes on behind the scenes. It's been very exciting to be part of this game and I hope many of you will be excited to play it. Remember to check out Lost in Random which releases on September 10, 2021. 
+</p>
+
+<h2>About the author</h2>
+<div>
+<a href="https://agentlien.github.io"><img class="profile-pic" height="115" src="https://avatars.githubusercontent.com/u/51108" /></a>
+<p>Hello,<br><br>
+My name is Daniel "Agentlien" Kvick and I'm a Software Engineer with a passion for games.<br>
+I currently work as a Graphics Programmer at Thunderful Development on Lost in Random.</p>
+<p><a href="https://agentlien.github.io">Here</a> you'll find a selection of things I have worked on.</p>
+</div>
+
+<script>
+initComparisons();
+</script>
+</body>
+</html>
