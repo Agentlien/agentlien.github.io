@@ -1,4 +1,133 @@
+body { 
+	background-color: #222222;
+	color: #E5E5E5;
+}
+
+article
+{
+	background-color: #303035;
+	margin-top: 40px;
+	margin-bottom: 40px;
+	margin-left: auto;
+	margin-right: auto;
+	min-width: 520px;
+	max-width: 1200px;
+	padding-left: 20;
+	padding-right: 20;
+	padding-top: 5;
+	padding-bottom: 20;
+	border-radius: 15px;
+}
+
+h1 {
+	font-size: 32px;
+}
+p {
+	min-width: 480px;
+	max-width: 1080px;
+}
+
+li {
+	min-width: 480px;
+	max-width: 1024px;
+	padding: 0 0.4rem;
+	margin-bottom: 0.6rem;
+}
+
 .profile-pic {
 	float: left;
 	padding: 0 10px 0 0;
+}
+
+.screenshot {
+	min-width: 480px;
+	max-width: 100%;
+	height: auto;
+}
+
+video {
+	min-width: 480px;
+	max-width:100%;
+	height: auto;
+}
+
+figcaption {
+	min-width: 540px;
+    font-style: italic;
+    padding-top: 5px;
+}
+
+code {
+	background-color: #27272C;
+	font-family: monospace;
+}
+
+pre {
+	background-color: #27272C;
+	display: block;
+	font-family: monospace;
+	white-space: pre;
+	max-width: 1024px;
+	padding-left: 10px;
+	padding-top: 10px;
+	padding-bottom: 10px;
+	overflow: auto;
+}
+
+* {box-sizing: border-box;}
+
+.img-comp-container {
+  position: relative;
+  height: 540px;
+}
+
+.img-comp-img {
+  position: absolute;
+  width: auto;
+  height: auto;
+  overflow:hidden;
+}
+
+.img-comp-base img {
+	min-width: 480px;
+	max-width:100%;
+	height: auto;
+}
+
+.img-comp-overlay img {
+	height: auto;
+}
+
+.img-comp-img img {
+  display:block;
+  vertical-align:middle;
+}
+
+.img-comp-slider {
+  position: absolute;
+  z-index:9;
+  cursor: ew-resize;
+  /*set the appearance of the slider:*/
+  width: 16px;
+  height: 60px;
+  background-color: #5596F3;
+  opacity: 0.8;
+  border-radius: 3px;
+  box-shadow: 7px 5px 5px #222222
+}
+
+a:link {
+	color: #FFFFFF
+}
+
+a:visited {
+	color: #888888
+}
+
+a:hover {
+	color: #FFFFFF
+}
+
+a:active {
+	color: #FFFFFF
 }
