@@ -1,0 +1,225 @@
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0">
+<title>Optimizing Unity Projects by Removing Additional Cameras</title>
+<meta name="description" content="Removing additional Unity cameras for performance in Wavetale.">
+<meta name="author" content="Agentlien">
+
+<meta property="og:title" content="Optimizing Unity Projects by Removing Additional Cameras">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://github.io/agentlien/cameras">
+<meta property="og:description" content="Optimizing Unity Projects by Removing Additional Cameras">
+<meta property="og:image" content="https://agentlien.github.io/cameras/foam.png">
+
+<link rel="stylesheet" href="../style.css">
+
+</head>
+<body>
+<article>
+<h1>Optimizing Unity Projects by Removing Additional Cameras</h1>
+
+<h2> Intro </h2>
+<p>
+Today's article will be my second one based on my work on the <a href="https://thunderfulgames.com/games/wavetale/">Wavetale</a> porting team - the first being about my <a href="https://agentlien.github.io/gloom">screen gloom replacement</a>. Unlike earlier articles I've written, this one is as much of a performance PSA as a behind the scenes look. Today's topic is a very common issue in Unity projects: excessive use of cameras.
+</p>
+
+<h2>The Goal</h2>
+<p>
+One of our biggest issues during the porting of Wavetale was the CPU overhead of the rendering. A large chunk of this turned out to be due to additional cameras used for rendering various elements to offscreen buffers. The issue here is not the time it takes to render the actual geometry, but rather the overhead incurred when switching between cameras. Luckily, most cameras can be removed by replacing them with custom render passes.
+</p>
+
+<p>
+To clarify, we are not talking about virtual cameras such as those used by Cinemachine. We are specifically talking about Unity's built-in Camera class. Also, this is not about compromise; this is not about lowering graphical fidelity or changing render settings. This is about doing the same work and achieving exactly the same result, but with less overhead.
+</p>
+
+<p>
+For reference, removing the three cameras described in this article resulted in 15ms(!) less CPU work per frame on our Switch version.
+</p>
+
+<h2>Cameras, render targets, and layers</h2>
+
+<p>
+Wavetale uses Unity with the Universal Render Pipeline (URP). While the examples and solutions we'll cover focus on Unity and URP the same problem exists when using other render pipelines as well. In fact, when holding the original presentation this article is based on, I was informed by a colleague that they've encountered similar issues with cameras in Unreal.
+</p>
+
+<p>
+A scene in Unity can contain any number of cameras, a subset of which are active at any given time. Each camera contains a number of settings including which renderer to use and which layers to render. Layers are simply a way to group objects depending on what they represent or how they should be rendered. Each object must belong to some layer. Examples of layers in Wavetale are Ground, Water, Enemies, and Projectiles. In general it is important to make good use of layers to be able to optimize your scene rendering. The way Unity renders a scene is to go through each of the currently active cameras and, for each active camera, render all objects belonging to any of its selected layers. 
+</p>
+
+<p>
+So why would one want to create additional cameras beyond the main camera? Mainly, using a different camera allows you to render to separate render targets and use different layer culling. You can also attach a camera to any object in the scene to make it follow that object with no additional code. In our case the three removed cameras were each rendering one specific layer to a set of offscreen buffers which were then used as input in later draw calls.
+</p>
+
+<h2>The Problem</h2>
+
+<p>
+While cameras make it very easy to do offscreen rendering of select layers from a given perspective, they come with significant CPU overhead. You can see this in the profiler: when rendering a camera the CPU is busy "rendering" for a long time before any actual render passes begin.
+</p>
+
+<figure>
+<img class="screenshot" width=960 src="profiler.png" />
+<figcaption>A screenshot of Unity's built-in profiler showing that the actual work (the opaque and transparent rendering passes) constitutes a small fraction of the time spent for each effect camera.</figcaption>
+</figure>
+
+<p>
+Some overhead is naturally unavoidable. If you enable occlusion culling, this requires a fair amount of CPU calculations. You also need to bind render targets and update camera transforms. If you change layer culling mask you also need to do culling and sorting of game objects before rendering them. However, none of this explains this overhead. We did not use occlusion culling for any of the removed cameras and we still do the rest of this work manually in our replacement passes. 
+</p>
+
+<h2>The Cameras</h2>
+
+<p>
+The three cameras which were replaced were
+<ul>
+	<li>Underwater Projection</li>
+	<li>Drop Shadow</li>
+	<li>Foam</li>
+</ul>
+</p>
+
+<p>
+Each of these cameras was replaced by a scriptable renderer feature which does two things
+<ol>
+	<li>Sets render target, camera transforms, culling settings, and sorting critera.</li>
+	<li>Calls URP's default rendering using <code>ScriptableRenderContext.DrawRenderers()</code>.</li>
+</ol>
+</p>
+
+<h2>Underwater Projection</h2>
+<p>
+This camera renders "The Shadow", a mysterious character who is always following our protagonist beneath the waves. The result is later composited into the water surface. The Shadow is technically part of the player prefab, but part of a layer ignored by the main camera.
+</p>
+
+<figure>
+<img class="screenshot" width=960 src="underwater_projection.png" />
+<figcaption>The Shadow can be seen under the water. On the right is a partial view of the offscreen buffer used to render it before it is composited into the water.</figcaption>
+</figure>
+
+<p>
+To replace the underwater projection camera I looked to URP's own Render Objects feature. This scriptable renderer feature renders to the camera's render targets. It allows you to override projection settings and set up layer filtering. Unfortunately, this filtering does not override layer culling. It can only be used to further narrow down the set of objects rendered, not select any which are culled by the camera. Additionally, this feature doesn't allow you to override render targets. It always renders to the camera's own render targets.
+</p>
+
+<p>
+To fix this I made some modifications, extending the Render Objects feature to suit our needs. I added a checkbox for whether to temporarily override layer culling to match the filtering. I also added an optional render target override. The solution was simple and effective. I added an instance of this feature with the underwater projection layer selected and overrode the render target with the one used for the Shadow. That's it, one camera gone.
+</p>
+
+<h2>Drop Shadow</h2>
+<p>
+A drop shadow is a classic platformer trick. You always render a shadow directly underneath the player, regardless of whether it makes sense with your current scene lighting. This allows players to see where they'll land when jumping. This was implemented by first rendering the player from above to a single-channel offscreen buffer using an orthographic projection. Then, this offscreen buffer was rendered onto the ground with a decal shader.
+</p>
+
+<p style="font-style: italic">
+Note: In the end I decided to remove this first pass for the Switch version, using a simple oval instead of the player's actual contour. This saved a fair bit of render time and actually looks good enough that I don't expect most players to notice.
+</p>
+
+<figure>
+<img class="screenshot" width=960 src="drop_shadow.png" />
+<figcaption>Standing on the ledge we can see how the drop shadow is nicely stretched across the vertical wall but rendered flat on top of the surface underneath. To the right you can see the shadow as it is rendered to the offscreen buffer.</figcaption>
+</figure>
+
+<p>
+Originally, I replaced this camera the same way I had done with the Underwater Projection. In order to get the top down view centered on the player I simply used a custom shader which set up an appropriate view matrix. Since we weren't using any colour information in the later decal pass I simply output 1.0 to each pixel.
+</p>
+
+<figure>
+<img class="screenshot" width=591 src="render_queue.png" />
+<figcaption>URP's Render Objects pass requires you to select whether to use Opaque or Transparent Render Queue</figcaption>
+</figure>
+
+<p>
+There was a problem, however. While the player character's body is opaque, her fishing net is transparent. Unity's Render Objects pass requires you to choose whether to render opaque or transparent objects. In order to work around this I extended the Render Objects feature once more, this time adding an option to select "Both" as render queue.
+</p>
+
+<figure>
+<img class="screenshot" width=328 src="net_shadow.png" />
+<figcaption>Sigrid's fishing net casting a shadow despite being disabled.
+</figure>
+
+<p>
+So now we're always rendering the shadow of the net, even when the net itself is invisible. Turns out, the net was always being rendered. However, the alpha was being set to 0 in the shader when a variable signified that the net was turned off. Since we override the shader we lose this logic. We could recreate the logic here, but this solution suddenly didn't feel so clean. I decided to come back to this later.
+</p>
+
+<h2>Foam</h2>
+
+<p>
+Our third and final camera was used to render foam on the water. More specifically, it renders a series of trails and rings on the water affected by player movement. It is another orthographic overhead view (like the drop shadow), rendered to an offscreen buffer, then composited into the water shader (like underwater projection).
+</p>
+
+<figure>
+<img class="screenshot" width=960 src="foam.png" />
+<figcaption>Player movement affects the foam on the water surface. On the right you can see how it is rendered to the offscreen buffer. The red and green channels are used to signal addition and removal of foam respectively.</figcaption>
+</figure>
+
+<p>
+Looking at the foam camera it was clear this was the most complicated one to replace.
+<ul>
+	<li>It's using a different perspective from the main camera, so we cannot render it with the default transforms.</li>
+	<li>This pass uses several different shaders with important logic and colour coded outputs, so we cannot override them with a single replacement.</li>
+	<li>The water trails are made up of a mix of opaque and transparent objects.</li>
+</ul>
+</p>
+
+<p>
+To solve these issues I created a Player Topdown Feature. It is a stripped down and heavily modified version of the Render Objects feature which does the following:
+<ul>
+	<li>Fetches player position.</li>
+	<li>Overrides camera view and projection matrices (<code>RenderingUtils.SetViewAndProjectionMatrices()</code>).</li>
+	<li>Updates object culling and sorting (<code>CreateDrawingSettings()</code>).</li>
+	<li>Handles both opaque and transparent objects in turn.</li>
+	<li>Renders as usual (<code>ScriptableRenderContext.DrawRenderers()</code>).</li>
+</ul>
+</p>
+
+<p>
+This makes for a renderer feature which is very simple to set up. Just specify the orthographic camera parameters, select render target, choose layers. Using it is a breeze and it allowed us to remove the final extra camera while retaining an identical* visual result.
+</p>
+
+<p style="font-style: italic">
+* Or rather, it would have been, had I not spotted and fixed a bug caused by the original camera setup (the last bullet point in Gotchas, below).
+</p>
+
+<h2>Drop Shadow (take two)</h2>
+<p>
+Now that I had implemented the Player Topdown feature I could easily use it to replace my previous solution for the drop shadow. This solves the transparency issue in a clean way which gives identical results to the original camera solution. There was only one tiny bit of extra work needed: while the foam camera had a fixed orientation the drop shadow camera was parented to the player and as such was affected by the player's orientation. To fix this I simply added a checkbox for whether to use the entire player transform or just the position when setting up my view matrix.
+</p>
+
+<h2>When can cameras be removed?</h2>
+<p>
+I've spent a bunch of time thinking about this and as far as I can see it should be very rare to have a camera which cannot be removed. Using custom shaders or renderer features we can override some values, update matrices, change culling and sorting. That's basically all the work a camera does for us. So at what point is it no longer worth it? I don't know, I haven't reached it yet. I assume it might be tough to replace cameras used for full-fledged portals or picture-in-picture views. Especially if you need occlusion culling. But short of that, I currently don't see much of a reason to use more than a single camera in Unity.
+</p>
+
+<h2>Gotchas</h2>
+<p>
+While it's certainly worth the effort to go through your cameras and replace them, there are a few things you need to be wary of.
+<ul>
+	<li>Consider what shaders are used for any camera that's being replaced. You cannot override a shader if you depend on their logic.</li>
+	<li>Shaders may read from built-in shader properties set by the camera. This is especially tricky with the built-in uniforms for inverse matrices (such as <code>UNITY_MATRIX_I_V</code>). When calling <code>SetViewAndProjectionMatrices()</code>, the final argument to this function is whether inverse matrices should be updated or not.</li>
+	<li>Keep in mind whether the camera you are removing is using a perspective or orthographic projection.</li>
+	<li>Is the camera parented to an object in the scene? If so, should its orientation depend on the orientation of said object?</li>
+	<li>When overriding camera values: change them back after rendering! Anyone who's written their own OpenGL application pre 4.0 knows the pain of getting this wrong.</li>
+	<li>Keep in mind that many cameras come with scripts attached which modify camera values (especially its transform).</li>
+	<li>Different cameras can have different opaque/transparent sorting order. In fact, when replacing the foam camera I noticed it had a strange sorting order. Changing to default actually made it look as intended, fixing a subtle visual bug no one had noticed.</li>
+</ul>
+</p>
+
+<h2>Conclusion</h2>
+<p>
+I hope this article has helped you see that most cameras can be removed for a nice performance boost without sacrificing visual fidelity. Whenever you consider adding a camera in Unity, instead think of how to do it without one. If you realise you already have extra cameras in your project, consider whether they can be removed.
+</p>
+
+<h2>About the author</h2>
+<div>
+<a href="https://agentlien.github.io"><img class="profile-pic" height="115" src="https://avatars.githubusercontent.com/u/51108" /></a>
+<p>Hello,<br><br>
+My name is Daniel "Agentlien" Kvick and I'm a Software Engineer with a passion for games.<br>
+I currently work as a Graphics Programmer at Thunderful Development.</p>
+<p><a href="https://agentlien.github.io">Here</a> you'll find a selection of things I have worked on.</p>
+</div>
+
+</article>
+<script>
+initComparisons();
+</script>
+</body>
+</html>
+

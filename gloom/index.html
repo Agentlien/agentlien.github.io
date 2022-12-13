@@ -1,0 +1,356 @@
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, height=device-height, initial-scale=1.0">
+<title>Screen Gloom Optimization in Wavetale</title>
+<meta name="description" content="A walk through the shader replacing our screen gloom effect on all ports of Wavetale.">
+<meta name="author" content="Agentlien">
+
+<meta property="og:title" content="Screen Gloom Optimization in Wavetale">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://github.io/agentlien/gloom">
+<meta property="og:description" content="A walk through the shader replacing our screen gloom effect on all ports of Wavetale.">
+<meta property="og:image" content="https://agentlien.github.io/gloom/gloom_shock.jpg">
+
+<link rel="stylesheet" href="../style.css">
+
+<script>
+function setVideoTimestamp(v, t) {
+	var player = document.getElementById(v);
+	player.currentTime = t;
+}
+</script>
+</head>
+<body>
+<article>
+<h1>Screen Gloom Optimization in Wavetale</h1>
+
+<h2> Intro </h2>
+<p>
+I wasn't part of the original <a href="https://thunderfulgames.com/games/wavetale/">Wavetale</a> team as I was busy <a href="https://agentlien.github.io/fog">working on Lost in Random</a>. Over the last year and a half, however, I have been part of a small team working to port Wavetale to more platforms. I've taken notes of some of the more interesting developments during this time and intend to publish a series of articles about them. This is the first of those, not counting <a href="https://agentlien.github.io/cleanup">the one introducing my Shader Cleanup tool</a>. 
+</p>
+<p>
+We started our work by targeting the current gen platforms: Playstation 5, Xbox Series X|S, and PC. While looking into graphics performance I had noticed that a surprising amount of time was spent in the UI rendering: a whopping 7 ms per frame on Xbox Series X. For a game with a relatively sparse UI this was clearly not normal. When looking into it I soon noticed the culprit: a single post effect running a full screen pass once per frame was taking 7 ms to render. The effect in question was the Screen Gloom.
+</p>
+
+<figure>
+<img class="screenshot" width=960 src="gloom_shock.jpg" />
+<figcaption>The original gloom shader</figcaption>
+</figure>
+<figure>
+
+<p>I was actually quite excited for this task. Most of the time my tasks are quite straightforward: I've identified some part of the rendering pipeline which is taking more resources than I feel it should. I look into why and find some minor changes which fix the issue. Sometimes I tweak the code, sometimes I change some settings. The larger tasks are mainly about refactoring things, implementing known techniques, etc. It's quite rare that I get free rein to just create a visual effect with no requirement other than it being efficient enough and invoking some kind of feeling. It's also highly unusual that what I work on is this abstract and artistic. I'm usually writing code to try and simulate some real-world phenomenon and trying to find a good balance between realism and efficiency. With this task I was quite free to just do anything which was fast enough and looked somewhat like gloom floating across the screen. As I took on the task I joked that I was donning my beret because today I was an artist!</p>
+
+<p>The task itself wasn't big. After some initial discussions I only spent two days actually looking into the problem and creating my replacement effect. But it was a surprisingly enjoyable task and I was quite happy with the result. What really made me want to make a writeup, however, was the fact that this is a short and relatively simple shader packed with fun little details to talk about. It's also entirely standalone and as such doesn't touch on any sensitive information about our code base in general.</p>
+
+<h2>Purpose of the shader</h2>
+
+<p>
+In Wavetale all enemies are made of a mysterious gooey substance known as gloom. All damage you take is from being covered in gloom which threatens to enclose you entirely, as it already has many of the NPCs you need to rescue throughout the world. When our hero Sigrid takes damage you can see gloom begin to cover her body. To reinforce this there is also a shader where the more damage you take the more the screen becomes covered in blobs of gloom floating around menacingly. This is our Screen Gloom effect. As originally shipped with Stadia this effect clearly does its intended job and performance-wise it wasn't an issue.
+</p>
+
+<h2>The problem</h2>
+
+<p>
+While the original screen gloom shader did what was needed for Stadia it wasn't efficient enough for other platforms. As mentioned above, on an Xbox Series X the pass took 7 ms. To put that in perspective at 60 frames per second we only have 16.7 ms to render the entire screen including all of the world and its characters, our intricate water shader, water reflections, etc. To have over 40% of that time eaten up by a single visual effect visible only while taking damage is clearly unacceptable.
+</p>
+
+<p>
+So why was this original version so expensive? The basic idea of it was to animate two layers of gloom blobs creeping across the screen. These blobs are generated using Voronoi noise, which partitions the screen into a set of cells. 
+</p>
+
+<figure>
+<img class="screenshot" width=300 src="voronoi.png" />
+<figcaption>Voronoi noise generated by the Voronoi node in Unity's Shader Graph</figcaption>
+</figure>
+
+<p>
+This type of noise is a good match because of its organic look which resembles biological cells. Unfortunately, a single instance of this noise requires 9 samples per pixel each of which is calculated using two calls to <code>sin()</code> and one to <code>cos()</code>. With two blocks of two layers each used to generate the blobs and spread them across the screen this ends up being 108 trigonometric functions for the noise alone. Add to this a bunch of code for fake lighting and a few other details and you have yourself one very heavy effect. For comparison, the original shader contains over a thousand floating point operations while the replacement contains just over a hundred. I spent some time comparing them and for every metric (float32 operations, instruction count, average cycles, ...) the original is between 6 and 11 times worse than the replacement. 
+</p>
+
+<h2>Initial ideas</h2>
+
+<p>
+I wanted to create something which would give the same general impression as the original solution but with a lot less calculations. The most important consideration was making something significantly simpler which wouldn't have to be replaced again as we moved on to optimzing the game for weaker platforms. It was also early in the porting project and I had a lot of other things which needed doing. As such, I needed a solution which was simple, quick to implement, efficient, and looked decent enough. I sat down and wrote down a number of alternative approaches:
+</p>
+
+<p>
+<ul>
+	<li><b>Reuse a single noise:</b> The biggest issue was that the way the original code was structured we ended up using 4 instances of Voronoi noise. Maybe I could reuse a single one and scale it differently for its different purposes? I wasn't sure I could make it convincing enough. Besides, even a single Voronoi noise would have been 27 trigonometric functions. More than I had hoped to get away with.</li>
+	<li><b>Use a texture:</b> Using a scrolling image of gloom blobs and some simple warping I might be able to make something decent. However, I would have to involve an artist, it might be hard to scale intensity with damage, I didn't want to introduce texture reads, and I was worried the patterns would be too easy to spot over time.</li>
+	<li><b>Generate a grid of warped circles:</b> I figured I could split the screen into a grid with a circle in each cell, then use a relatively low number of trigonometric functions to distort the grid. My only worries were how few trigonometric functions I could get away with and whether I could do this in a way which looked sufficiently organic.</li>
+</ul>
+</p>
+
+<p>
+The last approach was the one I felt had the most potential and so I decided to dedicate a couple of days to trying it out and seeing how close it would get me. This ended up being good enough that the resulting shader got signed off and the task closed. So I moved on with my life, until we finished the work on current gen consoles and I realised this might actually make for an interesting article.
+</p>
+
+<h2>The results</h2>
+
+<p>
+Before we go into the more technical details, let's look at the results. Here you can see a comparison between the original Stadia version of the Screen Gloom and my replacement used in all ports of the game.
+</p>
+
+<figure>
+<video width="960" height="540" autoplay loop muted >
+	<source src="gloom_comparison.mp4" type="video/mp4" />
+</video>
+<figcaption>The original screen gloom implementation followed by the replacement</figcaption>
+</figure>
+
+<p>
+You will notice that there are some differences in the visual characteristics of the two, but overall they convey the same idea: a set of gloom blobs are swimming across the screen, crawling their way across by extending outwards and contracting. The original effect looks its best at 0% health. The replacement is instead optimized to look its best at ~50% health, which is where I expect you to be most of the time when seeing this effect.
+</p>
+
+<p>
+As for performance? The original version took 7 ms on stadia. The replacement shader, on the other hand, costs 0.3 ms.
+</p>
+
+<h2>The chosen idea</h2>
+
+<p>
+So what, more exactly, is the intuition behind this idea and how did I go about implementing it? To understand what the shader does, let's look at this video. This was recorded in Unity's game view with my debug grid active and live tweaking the parameters to add each aspect of the solution one at a time. I've added a link to the relevant timestamp in each step of the explanation below.
+</p>
+
+<figure>
+<video id="process" width="960" height="540" loop muted controls >
+	<source src="gloom_process.mp4" type="video/mp4" />
+</video>
+<figcaption>A video displaying how the screen gloom replacement works by successively modifying parameters to add its different effects.</figcaption>
+</figure>
+
+<p>
+<ol>
+	<li><a href="javascript:setVideoTimestamp('process', 0)">Here</a> you can see that we start off with a simple grid of circles of pseudorandom radius. You may notice that a lot of cells are empty. This helps obscure the underlying grid pattern. </li>
+<li><a href="javascript:setVideoTimestamp('process', 4)">We then</a> start scrolling the grid across the screen. </li>
+<li><a href="javascript:setVideoTimestamp('process', 9)">Afterwards</a> we warp the coordinate system by offsetting it by a combination of sine and cosine of time and uv coordinates. This makes our blobs sway back and forth as they traverse the screen. </li>
+<li><a href="javascript:setVideoTimestamp('process', 19)">On top of this</a>, we apply a scaled version of the same warp, with swapped x and y coordinates. Now our blobs move forward through undulating contractions instead of just floating by. This helps their movements look more organic and less synchronized. </li>
+<li><a href="javascript:setVideoTimestamp('process', 24)">We now</a> add a second layer of blobs with another scale.</li>
+<li><a href="javascript:setVideoTimestamp('process', 34)">Finally</a>, a mask is added such that the blob radius is scaled towards zero the closer they get to the screen center. This makes the blobs appear to be rendered as a vignette.</li>
+</ol>
+</p>
+
+<h2>Implementation</h2>
+
+
+<p>
+So, how is this effect actually computed? The main part of the shader consists of the <code>blobGrid()</code> function which, after simplifying it somewhat (mainly removing the debug visualization), looks like this:
+</p>
+
+<p>
+<pre>int blobGrid(float2 uv, float gridSize, float gravity, out float lightFactor)
+{
+	float aspect = _ScreenParams.x / _ScreenParams.y;
+	float2 aspectCorrectedUV = float2(uv.x * aspect,uv.y);
+	float2 toCenter = (uv - float2(0.5,0.5));
+	float toCenterDistSq = dot(toCenter,toCenter);
+
+	// UV offset
+	float2 offsetUV = 0.5 + _OffsetScale0 * 
+		float2(2.446 * cos(_Time.x * 40.0) * sin(13.4 * uv.y - 2.3 * uv.x) * cos(0.4 * uv.y + 9.3 * uv.x)
+				, -1.453 * sin(uv.y));
+
+	// Combine UV distortions
+	float2 compositedUV = aspectCorrectedUV + offsetUV + gravity * _OffsetScale1 * float2(offsetUV.y, -offsetUV.x);
+
+	// Add gravity
+	float2 finalUV = compositedUV + float2(0.0,gravity * _Time.x);
+
+	float2 gridIndex = floor(finalUV * gridSize);
+
+	// Drop some to obscure grid pattern
+	if(fmod(gridIndex.x, 5.0) == 0.0 
+			|| fmod(gridIndex.y, 5.0) == 0.0 
+			|| fmod(gridIndex.x - gridIndex.y, 3.0) == 0.0)
+		return COLOR_NONE;
+
+	// Radius
+	float health = 1.0 - _HealthLevel;
+	float centerFade = saturate((toCenterDistSq - _CenterMaskRadius) / _CenterMaskRadius);
+	float radiusshift = saturate(0.8 + cos(gridIndex.x + gridIndex.y));
+	float cosIndex = cos(157.25 * gridIndex.x + 4414.146 * gridIndex.y);
+	float cosRadius = 0.5 * (2.0 - cosIndex);
+	float radius = _BlobRadius * radiusshift * cosRadius * centerFade * health;
+	float rimWidth = _RimWidth * centerFade * health;
+
+	int exitCode = blobIntersect(finalUV, radius, rimWidth, gridSize);
+
+	// Fake lighting
+	lightFactor = 1.0;
+	if(exitCode == COLOR_BASE)
+	{
+		float2 localUV = frac(gridSize * finalUV);
+		float2 toHighlight = localUV - float2(0.4,0.6);
+		float highlight = 0.3 * (dot(toHighlight, toHighlight) < 0.05);
+		float dropShadow = 1.0 - localUV.y;
+		lightFactor = 1.0 + highlight - (dropShadow * dropShadow);
+	}
+
+	return exitCode;
+
+}</pre>
+</p>
+
+<p>
+The blobIntersect function called near the end simply checks whether the generated coordinates are within the base, rim, or entirely outside of the corresponding blob:
+</p>
+
+<p>
+<pre>int blobIntersect(float2 uv, float radius, float rimWidth, float gridSize)
+{
+	float2 blobGrid = frac(gridSize * uv);
+	float len = distance(blobGrid,float2(0.5,0.5));
+	float diff = len - radius;
+	if(diff <= 0)
+		return COLOR_BASE;
+	else if(diff < rimWidth)
+		return COLOR_RIM;
+	return COLOR_NONE;
+}</pre>
+</p>
+
+<p>
+All of this generates an exit code which is one of COLOR_NONE, COLOR_RIM, or COLOR_BASE. This is later translated to an actual colour configurable in the material properties and modified using the lightFactor.
+</p>
+
+<h2>Breaking down the code</h2>
+<p>
+So let's go through these lines and look in detail at what most of them actually do and why. I'll be skipping some of the most boring or obvious parts.
+</p>
+
+<p>
+<pre>// UV offset
+float2 offsetUV = 0.5 + _OffsetScale0 * 
+	float2(2.446 * cos(_Time.x * 40.0) * sin(13.4 * uv.y - 2.3 * uv.x) * cos(0.4 * uv.y + 9.3 * uv.x)
+			, -1.453 * sin(uv.y));
+</pre>
+</p>
+
+<p>
+Here we calculate a first offset to our uv coordinates. We take the input <code>_OffsetScale0</code>, configurable on the material, and multiply by a combination of <code>cos()</code> and <code>sin()</code>, each with different scales. These numbers, like most here, are magic constants based on playing around and seeing what works well. I tried a lot of things which didn't end up used. Originally I based the distortion on a rotation of the grid, but it was quite far from the original effect and never looked natural. I also tried using the exponential function <code>exp()</code> but it ended up skewing things far too strongly. In the end this simpler position offset in two steps ended up looking the best. The important part here is that for x we combine uv coordinates and current time in a way which is messy and unpredictable to the human eye. For y we only add a simple vertical distortion based on the y coordinate itself. This is because while we want a lot of spurious horizontal movement we mainly want our blobs to move at a steady pace vertically.
+</p>
+
+<p>
+If you haven't worked with shaders before you might want to note the 0.5 added in front: this is a commonly used trick. Since our trigonometric functions all return values in the range [-1,1] and we want to map this to [0,1] we need to remap the range. To do this, given a value <code>uv</code> we can simply do <code>0.5 + 0.5 * uv</code>. If you're wondering where the factor 0.5 went in the above code it's assumed to be baked into the <code>_OffsetScale0</code> variable. The same remapping is often used to move from clip space to normalized devicce coordinates as well.
+</p>
+
+<p>
+You'll notice throughout this code that I largely generate values in the [0,1] range before applying a user configurable scale. This makes it a lot easier to balance our equations so cells don't become degenerate or discontinuous.
+</p>
+
+<p>
+<pre>// Combine UV distortions
+float2 compositedUV = aspectCorrectedUV + offsetUV + gravity * _OffsetScale1 * float2(offsetUV.y, -offsetUV.x);
+</pre>
+</p>
+
+<p>
+Here we add our aspect corrected uv with the offset computed above. We also add a flipped version of the same distortion, scaled by both gravity and its own parameter. This is a simple way to perform another layer of unpredictable distortions with very little extra computational cost. The combination of our two offfsets is what gives the undulating movement.
+</p>
+
+<p>
+<pre>float2 gridIndex = floor(finalUV * gridSize);
+
+// Drop some to obscure grid pattern
+if(fmod(gridIndex.x, 5.0) == 0.0 
+		|| fmod(gridIndex.y, 5.0) == 0.0 
+		|| fmod(gridIndex.x - gridIndex.y, 3.0) == 0.0)
+	return COLOR_NONE;
+</pre>
+</p>
+
+<p>
+A lot of the details throughout this function is simply stuff tweaked to make it more difficult for the player to discern any repeating patterns. Dropping a carefully chosen pattern of cells entirely was one of the best ways I found to obscure the fact that this is an animated grid. As long as the user can tell it's a grid the motion of different blobs becomes too predictable, which breaks the illusion. 
+</p>
+
+<p>
+We calculate which cell our current pixel using <code>floor()</code>, which rounds down to the nearest integer. This correspond to row and column number. I then drop every fifth row and column as well as each cell where the difference between column and row index equals three. I actually spent quite a lot of time, maybe an hour of active time spread over a few different sessions, trying different patterns before settling on this one.
+</p>
+
+<p>
+<pre>float health = 1.0 - _HealthLevel;
+float centerFade = saturate((toCenterDistSq - _CenterMaskRadius) / _CenterMaskRadius);
+</pre>
+</p>
+
+<p>
+Here we calculate two values which are used in scaling blob radius. Health scales all radii meaning the more damage you take, the more our blobs cover the screen. Then we calculate the aforementioned fade of blobs as they approach the center of the screen. Both of these are quite similar to what was done in the original shader. The video below shows how blob radius is scaled up as health goes from 100% to 0%. One nice improvement from the original is that we scale the rim width with blob radius, so small blobs don't look like all rim and no base.
+</p>
+
+<figure>
+<video id="scaling" width="960" height="540" autoplay loop muted controls >
+	<source src="gloom_scaling.mp4" type="video/mp4" />
+</video>
+	<figcaption>A video displaying how health affects blob radius. Health is briefly kept around 50% <a href="javascript:setVideoTimestamp('scaling', 16)">at this point</a>.</figcaption>
+</figure>
+
+<p>
+<pre>float radiusshift = saturate(0.8 + cos(gridIndex.x + gridIndex.y));
+float cosIndex = cos(157.25 * gridIndex.x + 4414.146 * gridIndex.y);
+float cosRadius = 0.5 * (2.0 - cosIndex);
+float radius = _BlobRadius * radiusshift * cosRadius * centerFade * health;
+float rimWidth = _RimWidth * centerFade * health;
+</pre>
+</p>
+
+<p>
+The code to compute blob radius is surprisingly intricate. This is because I quickly noticed that different and unpredictable radius between neighbouring blobs was important to obscure the underlying patterns. These various factors were the results of a lot of experiments and each helped with enforcing the illusion. After experimenting with these factors based on indices of grid cells and seeing the difference it made for radius I actually tried really hard to use them in other parts of the calculation. In the end it simply didn't contribute much to the position offset, mainly causing issues with discontinuity, but felt really good as a radius modifier. 
+</p>
+
+<p>
+<pre>// Fake lighting
+lightFactor = 1.0;
+if(exitCode == COLOR_BASE)
+{
+	float2 localUV = frac(gridSize * finalUV);
+	float2 toHighlight = localUV - float2(0.4,0.6);
+	float highlight = 0.3 * (dot(toHighlight, toHighlight) < 0.05);
+	float dropShadow = 1.0 - localUV.y;
+	lightFactor = 1.0 + highlight - (dropShadow * dropShadow);
+}
+</pre>
+</p>
+
+<p>
+This adds a highlight spot to each blob and a simple drop shadow which tapers off quadratically across the height of each blob. It's a simple touch but it makes everything look a lot less flat. The original shader had a much more intricate and physically accurate lighting applied to the blobs.
+</p>
+
+<h2>Potential improvements</h2>
+
+<p>
+While I'm satisfied with the end result it could of course always be improved. From a visual perspective I would say the biggest issue is that neighbouring blobs still move a bit too much in unison. It isn't noticeable during normal gameplay, especially since it's only really visible when heavily damaged for a prolonged period of time. This is unlikely since you heal over time so you'd have to sustain continuous damage without dying. Not to mention that you'd have to stare at these blobs instead of the monsters trying to kill you. Still, when staring at the blobs during development my eyes often fix on the overall pattern in a way which makes it clear that these are circles painted on a deformed surface, not separate blobs moving roughly together. This could possibly be alleviated with a more careful choice of how to deform the grid. I did try being clever and consider scaling factors for the various distortions and the grid resolution in such a way that nearby cells move less in unison. Unfortunately, this mostly resulted either in discontinuity or extreme warping and shearing of the blobs.
+</p>
+
+<p>
+Another potential improvement would be to tweak the range of sizes for these blobs. Being a grid there's an unfortunate link between blob radius and density which complicates fine-tuning. One potential solution would be to have more layers and make each very sparse, dropping the majority of blobs. A related concern is that the current solution tends to create a lot of little specks. This is mainly due to blob radius being faded towards zero as they near the center. I tried limiting this by adding a minimum size and culling blobs below it. This made the blob surface discontinuous unless radius is based entirely on grid index. But such a radius makes for a less organic look. It also leads to flickering for blobs which happen to hover near this cutoff. While it would have been a nice improvement it was yet another thing which would have required more tweaking than I had time for. 
+</p>
+
+<p>
+Knowing myself and the relatively low priority of this task I had given myself a hard limit for how long to spend on it unless asked by our art director or producer to continue improving it. There will always be improvements and I find it far too easy to spend days on end just tweaking minor details without considering how worthwhile it really is. So yes, I do think the visual quality could be improved, but I already picked the low hanging fruit here and I couldn't justify spending more time on this task.
+</p>
+
+<p>
+It's also worth considering further performance improvements. I did this while developing the effect and in short there's not much to be gained. There are some obvious slight improvements. The <code>blobIntersect()</code> function uses <code>distance()</code> but only uses the result to compare against radius. This does imply an unnecessary <code>sqrt</code> and we could just dot <code>blobGrid-float2(0.5,0.5)</code> with itself and compare directly to <code>radius * radius</code>. Furthermore, looking at the equations for UV I haven't really put much thought into order of operation. I might be able to decrease the number of operations by reordering things to get more MAD. That is, fused multiply-add, a type of instruction which allows you to get an addition for free when performing multiplication. Would this type of micro optimization help us? No. As a quick test I tried replacing my shader with a trivial one, or even removing the effect altogether, and it did nothing for performance. This shader is run in parallel with other UI work which isn't compute bound, so we just end up with slightly lower GPU utilization instead.
+</p>
+
+<h2>Wavetale is out now!</h2>
+<p>
+I hope you enjoyed this trip through one of the many shaders used in <a href="https://thunderfulgames.com/games/wavetale/">Wavetale</a>. The game is out now for Stadia, Xbox Series X|S, Xbox One, Playstation 5, Playstation 4, Nintendo Switch, and PC. It's a fun adventure exploring a beautiful world filled with quirky characters. I feel happy to have been a part of it and I really enjoyed taking the time to play through the story during development. 
+</p>
+
+<h2>About the author</h2>
+<div>
+<a href="https://agentlien.github.io"><img class="profile-pic" height="115" src="https://avatars.githubusercontent.com/u/51108" /></a>
+<p>Hello,<br><br>
+My name is Daniel "Agentlien" Kvick and I'm a Software Engineer with a passion for games.<br>
+I currently work as a Graphics Programmer at Thunderful Development.</p>
+<p><a href="https://agentlien.github.io">Here</a> you'll find a selection of things I have worked on.</p>
+</div>
+
+</article>
+<script>
+initComparisons();
+</script>
+</body>
+</html>
