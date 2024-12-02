@@ -232,7 +232,7 @@ Here we calculate a first offset to our uv coordinates. We take the input <code>
 </p>
 
 <p>
-If you haven't worked with shaders before you might want to note the 0.5 added in front: this is a commonly used trick. Since our trigonometric functions all return values in the range [-1,1] and we want to map this to [0,1] we need to remap the range. To do this, given a value <code>uv</code> we can simply do <code>0.5 + 0.5 * uv</code>. If you're wondering where the factor 0.5 went in the above code it's assumed to be baked into the <code>_OffsetScale0</code> variable. The same remapping is often used to move from clip space to normalized device coordinates as well.
+If you haven't worked with shaders before you might want to note the 0.5 added in front: this is a commonly used trick. Since our trigonometric functions all return values in the range [-1,1] and we want to map this to [0,1] we need to remap the range. To do this, given a value <code>uv</code> we can simply do <code>0.5 + 0.5 * uv</code>. If you're wondering where the factor 0.5 went in the above code it's assumed to be baked into the <code>_OffsetScale0</code> variable. The same remapping is often used to move from normalized device coordinates in [-1,1] to fullscreen texture coordinates in [0,1].
 </p>
 
 <p>
