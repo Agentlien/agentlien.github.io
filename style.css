@@ -21,6 +21,13 @@ article
 h1 {
 	font-size: 32px;
 }
+
+.publication_date {
+	margin-top: -20;
+	font-style: italic;
+	color: #C0C0C0;
+}
+
 p {
 	max-width: 1080px;
 }
